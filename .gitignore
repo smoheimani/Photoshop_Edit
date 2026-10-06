@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.py[cod]
+INL_SFD_Photoshop_Template.psd
+Test/
+*_Photoshop_Masks/
+*_Edited*.psd
