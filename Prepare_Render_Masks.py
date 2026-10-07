@@ -84,10 +84,31 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build Photoshop masks from 3ds Max EXR render elements.")
     parser.add_argument("render", nargs="?", type=Path, help="Beauty render EXR")
     parser.add_argument("output_folder", nargs="?", type=Path, help="Folder for generated grayscale masks")
+    parser.add_argument(
+        "--request-file",
+        type=Path,
+        help="UTF-8 text file containing the render path and output folder on separate lines",
+    )
     args = parser.parse_args()
 
     root = None
-    render_path = args.render
+    if args.request_file is not None:
+        if args.render is not None or args.output_folder is not None:
+            parser.error("--request-file cannot be combined with positional paths")
+        try:
+            request_lines = args.request_file.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError) as error:
+            print(f"Could not read mask preparation request:\n{error}")
+            return 1
+        if len(request_lines) != 2 or not all(request_lines):
+            print("Mask preparation request must contain a render path and an output folder.")
+            return 1
+        render_path = Path(request_lines[0].lstrip("\ufeff"))
+        requested_output_folder = Path(request_lines[1])
+    else:
+        render_path = args.render
+        requested_output_folder = args.output_folder
+
     if render_path is None:
         import tkinter as tk
         from tkinter import filedialog
@@ -103,7 +124,7 @@ def main() -> int:
             return 0
         render_path = Path(selected)
 
-    output_folder = args.output_folder or render_path.with_name(f"{render_path.stem}_Photoshop_Masks")
+    output_folder = requested_output_folder or render_path.with_name(f"{render_path.stem}_Photoshop_Masks")
     try:
         prepare_masks(render_path, output_folder)
     except Exception as error:

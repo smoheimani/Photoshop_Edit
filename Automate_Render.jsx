@@ -17,17 +17,21 @@ app.bringToFront();
 
     var maskNames = ["House", "Hardscape", "BG Trees", "Sky", "Windows"];
     var maskOutputFolder = new Folder(renderFile.parent.fsName + "/" + renderFile.name.replace(/\.exr$/i, "") + "_Photoshop_Masks");
-    if (!maskOutputFolder.exists) {
-        alert("Run Prepare_Render_Masks.bat first. It creates:\n" + maskOutputFolder.fsName);
-        return;
-    }
     var maskFiles = [];
     for (var fileIndex = 0; fileIndex < maskNames.length; fileIndex++) {
         maskFiles.push(new File(maskOutputFolder.fsName + "/" + maskNames[fileIndex] + ".png"));
-        if (!maskFiles[fileIndex].exists) {
-            alert("A generated mask is missing:\n" + maskFiles[fileIndex].fsName + "\nRun Prepare_Render_Masks.bat again.");
+    }
+    if (!allMaskFilesExist(maskFiles)) {
+        try {
+            prepareMasksForRender(renderFile, maskOutputFolder);
+        } catch (maskError) {
+            alert("Could not prepare masks for the selected render:\n" + maskError.message);
             return;
         }
+    }
+    if (!allMaskFilesExist(maskFiles)) {
+        alert("Mask preparation finished, but one or more required masks are missing:\n" + maskOutputFolder.fsName);
+        return;
     }
 
     var outputFolder = Folder.selectDialog("Choose a folder for the processed PSD");
@@ -45,6 +49,25 @@ app.bringToFront();
         currentStage = "Opening the template PSD";
         outputDoc = app.open(templateFile);
 
+        var renderLayerName = decodeURI(renderFile.name.replace(/\.exr$/i, ""));
+        var baseRenderLayer = findUniqueLayer(outputDoc, "Inland_TheFarm_Orchards_ResidenceOne_ElevationA.exr");
+        if (baseRenderLayer.typename !== "ArtLayer" || baseRenderLayer.kind !== LayerKind.NORMAL) {
+            throw new Error("The template's original base render layer was not found or is not a pixel layer.");
+        }
+        outputDoc.activeLayer = baseRenderLayer;
+        currentStage = "Converting the original base render to a replaceable smart object";
+        executeAction(stringIDToTypeID("newPlacedLayer"), undefined, DialogModes.NO);
+        baseRenderLayer = outputDoc.activeLayer;
+        if (baseRenderLayer.typename !== "ArtLayer" || baseRenderLayer.kind !== LayerKind.SMARTOBJECT) {
+            throw new Error("Photoshop could not convert the original base render to a smart object.");
+        }
+
+        currentStage = "Replacing the original base render with the selected EXR";
+        var baseReplaceDesc = new ActionDescriptor();
+        baseReplaceDesc.putPath(charIDToTypeID("null"), renderFile);
+        executeAction(stringIDToTypeID("placedLayerReplaceContents"), baseReplaceDesc, DialogModes.NO);
+        baseRenderLayer.name = renderLayerName;
+
         var renderLayer = findUniqueLayer(outputDoc, "Copy of Beauty Pass and Convert to Smart Object - Camera RAW");
         if (renderLayer.typename !== "ArtLayer" || renderLayer.kind !== LayerKind.SMARTOBJECT) {
             throw new Error("The template's Camera Raw smart-object layer was not found or is not a smart object.");
@@ -55,6 +78,7 @@ app.bringToFront();
         var replaceDesc = new ActionDescriptor();
         replaceDesc.putPath(charIDToTypeID("null"), renderFile);
         executeAction(stringIDToTypeID("placedLayerReplaceContents"), replaceDesc, DialogModes.NO);
+        renderLayer.name = renderLayerName;
 
         var localGroup = findUniqueLayer(outputDoc, "Local");
         var buildingGroup = findUniqueLayer(outputDoc, "Building Adjustments");
@@ -102,6 +126,94 @@ app.bringToFront();
             Math.round(sourceDoc.height.as("px")) !== Math.round(targetDoc.height.as("px"))) {
             throw new Error("A generated mask and the template have different canvas dimensions.");
         }
+    }
+
+    function allMaskFilesExist(files) {
+        for (var i = 0; i < files.length; i++) {
+            if (!files[i].exists) return false;
+        }
+        return true;
+    }
+
+    function prepareMasksForRender(selectedRender, outputFolder) {
+        var scriptFolder = File($.fileName).parent;
+        var pythonFile = new File(scriptFolder.fsName + "/.venv/Scripts/python.exe");
+        var maskScript = new File(scriptFolder.fsName + "/Prepare_Render_Masks.py");
+        if (!pythonFile.exists || !maskScript.exists) {
+            throw new Error("The workspace Python environment or Prepare_Render_Masks.py was not found. Complete the setup in README.md first.");
+        }
+
+        var jobId = "PhotoshopMaskJob_" + (new Date().getTime()) + "_" + Math.floor(Math.random() * 1000000);
+        var requestFile = new File(Folder.temp.fsName + "/" + jobId + ".txt");
+        var batchFile = new File(Folder.temp.fsName + "/" + jobId + ".bat");
+        var statusFile = new File(Folder.temp.fsName + "/" + jobId + ".status");
+        var logFile = new File(Folder.temp.fsName + "/" + jobId + ".log");
+        var requestWritten = false;
+        var batchWritten = false;
+        var batchStarted = false;
+
+        try {
+            requestFile.encoding = "UTF-8";
+            requestFile.lineFeed = "Windows";
+            if (!requestFile.open("w")) throw new Error("Could not create a temporary mask request file.");
+            requestFile.write(selectedRender.fsName + "\r\n" + outputFolder.fsName + "\r\n");
+            requestFile.close();
+            requestWritten = true;
+
+            batchFile.encoding = "UTF-8";
+            batchFile.lineFeed = "Windows";
+            if (!batchFile.open("w")) throw new Error("Could not create a temporary mask preparation command.");
+            batchFile.writeln("@echo off");
+            batchFile.writeln("setlocal");
+            batchFile.writeln("set PYTHONIOENCODING=utf-8");
+            batchFile.writeln(
+                quoteBatchPath(pythonFile.fsName) + " " +
+                quoteBatchPath(maskScript.fsName) + " --request-file " +
+                quoteBatchPath(requestFile.fsName) + " > " +
+                quoteBatchPath(logFile.fsName) + " 2>&1"
+            );
+            batchFile.writeln('set "jobExitCode=%ERRORLEVEL%"');
+            batchFile.writeln("> " + quoteBatchPath(statusFile.fsName) + " echo %jobExitCode%");
+            batchFile.close();
+            batchWritten = true;
+
+            if (!batchFile.execute()) throw new Error("Windows could not start mask preparation.");
+            batchStarted = true;
+
+            var deadline = new Date().getTime() + 600000;
+            while (!statusFile.exists && new Date().getTime() < deadline) {
+                $.sleep(250);
+            }
+            if (!statusFile.exists) {
+                throw new Error("Mask preparation did not finish within 10 minutes. The process may still be running.");
+            }
+
+            batchStarted = false;
+            statusFile.encoding = "UTF-8";
+            if (!statusFile.open("r")) throw new Error("Could not read the mask preparation result.");
+            var exitCode = statusFile.read().replace(/^\s+|\s+$/g, "");
+            statusFile.close();
+            if (exitCode !== "0") {
+                var details = "";
+                if (logFile.exists && logFile.open("r")) {
+                    logFile.encoding = "UTF-8";
+                    details = logFile.read();
+                    logFile.close();
+                }
+                throw new Error("Mask preparation failed." + (details ? "\n" + details : ""));
+            }
+        } finally {
+            if (!batchStarted || statusFile.exists) {
+                if (requestWritten) requestFile.remove();
+                if (batchWritten) batchFile.remove();
+                if (statusFile.exists) statusFile.remove();
+                if (logFile.exists) logFile.remove();
+            }
+        }
+    }
+
+    function quoteBatchPath(path) {
+        return '"' + path.replace(/%/g, "%%") + '"';
     }
 
     function findUniqueLayer(container, name) {

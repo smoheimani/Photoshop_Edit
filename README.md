@@ -21,8 +21,7 @@ Keep the local template file `INL_SFD_Photoshop_Template.psd` in this folder. It
 
 ## Run
 
-1. Double-click `Prepare_Render_Masks.bat` and select the beauty render EXR. The related mask and alpha render elements must be in the same folder. The script writes a `<render-name>_Photoshop_Masks` folder beside the render.
-2. In Photoshop, choose **File > Scripts > Browse** and open `Automate_Render.jsx`.
-3. Select the same beauty render EXR and choose an output folder.
+1. In Photoshop, choose **File > Scripts > Browse** and open `Automate_Render.jsx`.
+2. Select the beauty render EXR and choose an output folder. If masks have not already been generated for that render, the script prepares them automatically in a `<render-name>_Photoshop_Masks` folder beside it.
 
-The output is a new layered PSD. The automation does not overwrite the template.
+The render-element EXRs and alpha pass must be beside the beauty render. `Prepare_Render_Masks.bat` remains available for generating masks separately. The output is a new layered PSD; the automation does not overwrite the template.
