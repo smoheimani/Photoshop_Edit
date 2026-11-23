@@ -226,10 +226,14 @@ app.bringToFront();
 
     function prepareMasksForRender(selectedRender, outputFolder) {
         var scriptFolder = File($.fileName).parent;
-        var pythonFile = new File(scriptFolder.fsName + "/.venv/Scripts/python.exe");
+        var localAppData = $.getenv("LOCALAPPDATA");
+        if (!localAppData) {
+            throw new Error("Windows LOCALAPPDATA is not available for this user.");
+        }
+        var pythonFile = new File(localAppData + "/Photoshop_Edit/.venv/Scripts/python.exe");
         var maskScript = new File(scriptFolder.fsName + "/Prepare_Render_Masks.py");
         if (!pythonFile.exists || !maskScript.exists) {
-            throw new Error("The workspace Python environment or Prepare_Render_Masks.py was not found. Complete the setup in README.md first.");
+            throw new Error("The user's Python environment or Prepare_Render_Masks.py was not found. Complete the per-user setup in README.md first.");
         }
 
         var jobId = "PhotoshopMaskJob_" + (new Date().getTime()) + "_" + Math.floor(Math.random() * 1000000);

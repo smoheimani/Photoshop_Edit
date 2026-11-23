@@ -10,14 +10,15 @@ Automates the Photoshop finishing steps for a 3ds Max EXR render using the adjus
 
 ## Setup
 
-From this folder, create a virtual environment and install the dependencies:
+Each user needs Python 3.10 or newer on their computer. The scripts and template can stay on a shared server, but each user must create their own Python environment locally. In PowerShell, replace the example server path below with the shared folder path, then run:
 
 ```powershell
-py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+$envPath = Join-Path $env:LOCALAPPDATA "Photoshop_Edit\.venv"
+py -3 -m venv $envPath
+& "$envPath\Scripts\python.exe" -m pip install -r "\\ServerName\Shared\Photoshop_Edit\requirements.txt"
 ```
 
-The `NewTest/SFH_PSD_Template.psd` template and sample render passes are stored in Git LFS because they include large project assets.
+This creates the environment under the user's Windows profile. Keep the shared folder structure intact, including `NewTest\SFH_PSD_Template.psd`. Users need read access to the scripts/template and write access to the render and output folders.
 
 ## Run
 
