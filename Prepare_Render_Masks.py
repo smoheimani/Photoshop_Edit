@@ -26,10 +26,6 @@ def read_rgba(path: Path, expected_shape: tuple[int, int] | None = None) -> np.n
     return pixels
 
 
-def union(*channels: np.ndarray) -> np.ndarray:
-    return np.maximum.reduce(channels)
-
-
 def save_mask(path: Path, values: np.ndarray) -> None:
     pixels = np.rint(np.clip(values, 0.0, 1.0) * 65535.0).astype(np.uint16)
     Image.fromarray(pixels).save(path)
@@ -40,39 +36,26 @@ def prepare_masks(render_path: Path, output_folder: Path) -> None:
     render = read_rgba(render_path)
     image_shape = render.shape[:2]
 
-    def mask_pass(name: str) -> np.ndarray:
-        path = render_path.with_name(f"{stem}_CMasking_Mask_{name}.exr")
+    def render_element(*suffixes: str) -> np.ndarray:
+        candidates = [render_path.with_name(f"{stem}_{suffix}.exr") for suffix in suffixes]
+        path = next((candidate for candidate in candidates if candidate.is_file()), None)
+        if path is None:
+            expected = ", ".join(candidate.name for candidate in candidates)
+            raise FileNotFoundError(f"Required render element not found. Expected one of: {expected}")
         return read_rgba(path, image_shape)
 
-    vegetation = mask_pass("House_Shrubs_Trees")
-    scatter = mask_pass("BGScatter_Grass_Gravel")
-    glass = mask_pass("Glass_Door_Garage")
-    hardscape = mask_pass("Hardscape_Asphalt_Mulch")
-    road = mask_pass("Road_SiteSD_STONE")
-    columns = mask_pass("Columns_BracketDetails_Roof")
-    trim = mask_pass("Fascia_Trim Corner_Trim")
-    siding = mask_pass("Siding1_Siding2_Siding3")
-    alpha = read_rgba(render_path.with_name(f"{stem}_CShading_Alpha.exr"), image_shape)
-
+    house = render_element("CMasking_Mask_House", "House")
+    background_trees = render_element(
+        "CMasking_Mask_Background_Tree_Scatter",
+        "Background_Tree_Scatter",
+        "CMasking_Mask_Background_Trees",
+        "Background_Trees",
+    )
+    alpha_sky = render_element("CShading_Alpha", "CShading_Alpha_Sky", "Alpha_Sky")
     masks = {
-        "House": union(
-            vegetation[:, :, 0],
-            *[layer[:, :, channel] for layer in (columns, trim, siding) for channel in range(3)],
-            glass[:, :, 1],
-            glass[:, :, 2],
-        ),
-        "Hardscape": union(
-            *[layer[:, :, channel] for layer in (hardscape, road) for channel in range(3)],
-            scatter[:, :, 2],
-        ),
-        "BG Trees": union(
-            vegetation[:, :, 1],
-            vegetation[:, :, 2],
-            scatter[:, :, 0],
-            scatter[:, :, 1],
-        ),
-        "Sky": 1.0 - alpha[:, :, 0],
-        "Windows": glass[:, :, 0],
+        "House": house[:, :, 0],
+        "BG Trees": background_trees[:, :, 0],
+        "Alpha_Sky": alpha_sky[:, :, 0],
     }
 
     output_folder.mkdir(parents=True, exist_ok=True)

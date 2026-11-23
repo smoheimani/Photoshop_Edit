@@ -1,0 +1,2 @@
+NewTest/SFH_PSD_Template.psd filter=lfs diff=lfs merge=lfs -text
+NewTest/RenderPass/*.exr filter=lfs diff=lfs merge=lfs -text

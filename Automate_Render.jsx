@@ -2,9 +2,9 @@
 app.bringToFront();
 
 (function () {
-    var templateFile = new File(File($.fileName).parent.fsName + "/INL_SFD_Photoshop_Template.psd");
+    var templateFile = new File(File($.fileName).parent.fsName + "/NewTest/SFH_PSD_Template.psd");
     if (!templateFile.exists) {
-        alert("The template PSD must be in the same folder as this script.");
+        alert("The template PSD must be in the NewTest folder beside this script.");
         return;
     }
 
@@ -15,12 +15,13 @@ app.bringToFront();
         return;
     }
 
-    var maskNames = ["House", "Hardscape", "BG Trees", "Sky", "Windows"];
+    var maskNames = ["House", "BG Trees"];
     var maskOutputFolder = new Folder(renderFile.parent.fsName + "/" + renderFile.name.replace(/\.exr$/i, "") + "_Photoshop_Masks");
     var maskFiles = [];
     for (var fileIndex = 0; fileIndex < maskNames.length; fileIndex++) {
         maskFiles.push(new File(maskOutputFolder.fsName + "/" + maskNames[fileIndex] + ".png"));
     }
+    maskFiles.push(new File(maskOutputFolder.fsName + "/Alpha_Sky.png"));
     if (!allMaskFilesExist(maskFiles)) {
         try {
             prepareMasksForRender(renderFile, maskOutputFolder);
@@ -50,7 +51,7 @@ app.bringToFront();
         outputDoc = app.open(templateFile);
 
         var renderLayerName = decodeURI(renderFile.name.replace(/\.exr$/i, ""));
-        var baseRenderLayer = findUniqueLayer(outputDoc, "Inland_TheFarm_Orchards_ResidenceOne_ElevationA.exr");
+        var baseRenderLayer = findUniqueLayer(outputDoc, "Beauty Pass");
         if (baseRenderLayer.typename !== "ArtLayer" || baseRenderLayer.kind !== LayerKind.NORMAL) {
             throw new Error("The template's original base render layer was not found or is not a pixel layer.");
         }
@@ -68,7 +69,7 @@ app.bringToFront();
         executeAction(stringIDToTypeID("placedLayerReplaceContents"), baseReplaceDesc, DialogModes.NO);
         baseRenderLayer.name = renderLayerName;
 
-        var renderLayer = findUniqueLayer(outputDoc, "Copy of Beauty Pass and Convert to Smart Object - Camera RAW");
+        var renderLayer = findUniqueLayer(outputDoc, "Copy of Beauty Pass - Convert To Smart Object - CameraRAW");
         if (renderLayer.typename !== "ArtLayer" || renderLayer.kind !== LayerKind.SMARTOBJECT) {
             throw new Error("The template's Camera Raw smart-object layer was not found or is not a smart object.");
         }
@@ -81,14 +82,20 @@ app.bringToFront();
         renderLayer.name = renderLayerName;
 
         var localGroup = findUniqueLayer(outputDoc, "Local");
-        var buildingGroup = findUniqueLayer(outputDoc, "Building Adjustments");
+        var mmGroup = findUniqueLayer(outputDoc, "MM");
+        var alphaLayer = findUniqueLayerIn(mmGroup, "Alpha_Sky");
+        var curveLayer = findUniqueLayerIn(mmGroup, "Curves 9");
+        var mergedSkyLayer = findUniqueLayerIn(mmGroup, "Sky_Invert");
+        if (alphaLayer.typename !== "ArtLayer" || alphaLayer.kind !== LayerKind.NORMAL ||
+            mergedSkyLayer.typename !== "ArtLayer" || mergedSkyLayer.kind !== LayerKind.NORMAL ||
+            curveLayer.typename !== "ArtLayer") {
+            throw new Error("The template's MM Alpha_Sky, Curves 9, or Sky_Invert layer has an unexpected type.");
+        }
         var targetGroups = [
             findUniqueLayerIn(localGroup, "House"),
-            findUniqueLayerIn(localGroup, "Hardscape"),
-            findUniqueLayerIn(localGroup, "BG Trees"),
-            findUniqueLayerIn(localGroup, "Sky"),
-            findUniqueLayerIn(buildingGroup, "Windows")
+            findUniqueLayerIn(localGroup, "BG Trees")
         ];
+        var skyTargetGroup = findUniqueLayerIn(localGroup, "Sky_Invert");
 
         for (var i = 0; i < maskNames.length; i++) {
             currentStage = "Opening the generated " + maskNames[i] + " mask";
@@ -99,6 +106,88 @@ app.bringToFront();
             maskDoc.close(SaveOptions.DONOTSAVECHANGES);
             maskDoc = null;
         }
+
+        currentStage = "Opening the selected render's Alpha_Sky mask";
+        maskDoc = app.open(maskFiles[2]);
+        assertSameCanvas(maskDoc, outputDoc);
+        currentStage = "Updating MM/Alpha_Sky from the selected render";
+        app.activeDocument = maskDoc;
+        maskDoc.selection.selectAll();
+        maskDoc.selection.copy();
+        app.activeDocument = outputDoc;
+        outputDoc.activeLayer = alphaLayer;
+        outputDoc.paste();
+        var replacementAlpha = outputDoc.activeLayer;
+        replacementAlpha.move(alphaLayer, ElementPlacement.PLACEBEFORE);
+        replacementAlpha.name = "Alpha_Sky";
+        replacementAlpha.visible = alphaLayer.visible;
+        alphaLayer.remove();
+        maskDoc.close(SaveOptions.DONOTSAVECHANGES);
+        maskDoc = null;
+
+        currentStage = "Merging MM/Alpha_Sky with MM/Curves 9";
+        var rootVisibility = [];
+        for (var rootIndex = 0; rootIndex < outputDoc.layers.length; rootIndex++) {
+            rootVisibility.push(outputDoc.layers[rootIndex].visible);
+            outputDoc.layers[rootIndex].visible = false;
+        }
+        var alphaVisibility = replacementAlpha.visible;
+        var skyVisibility = mergedSkyLayer.visible;
+        var mmVisibility = [];
+        for (var mmIndex = 0; mmIndex < mmGroup.layers.length; mmIndex++) {
+            mmVisibility.push({
+                layer: mmGroup.layers[mmIndex],
+                visible: mmGroup.layers[mmIndex].visible
+            });
+            mmGroup.layers[mmIndex].visible = false;
+        }
+        mmGroup.visible = true;
+        replacementAlpha.visible = true;
+        curveLayer.visible = true;
+        app.activeDocument = outputDoc;
+        outputDoc.selection.selectAll();
+        outputDoc.selection.copy(true);
+        outputDoc.selection.deselect();
+        outputDoc.paste();
+        var updatedSkyLayer = outputDoc.activeLayer;
+        updatedSkyLayer.move(mergedSkyLayer, ElementPlacement.PLACEBEFORE);
+        updatedSkyLayer.name = "Sky_Invert";
+        updatedSkyLayer.visible = false;
+        for (var restoreRoot = 0; restoreRoot < outputDoc.layers.length; restoreRoot++) {
+            outputDoc.layers[restoreRoot].visible = rootVisibility[restoreRoot];
+        }
+        for (var restoreMM = 0; restoreMM < mmVisibility.length; restoreMM++) {
+            var savedLayer = mmVisibility[restoreMM];
+            savedLayer.layer.visible = savedLayer.visible;
+        }
+        replacementAlpha.visible = alphaVisibility;
+        mergedSkyLayer.remove();
+        updatedSkyLayer.visible = skyVisibility;
+
+        currentStage = "Creating a mask document from the updated MM/Sky_Invert layer";
+        app.activeDocument = outputDoc;
+        updatedSkyLayer.visible = true;
+        outputDoc.activeLayer = updatedSkyLayer;
+        outputDoc.selection.selectAll();
+        outputDoc.selection.copy();
+        outputDoc.selection.deselect();
+        updatedSkyLayer.visible = skyVisibility;
+        maskDoc = app.documents.add(
+            outputDoc.width,
+            outputDoc.height,
+            outputDoc.resolution,
+            "Sky_Invert Mask",
+            NewDocumentMode.RGB,
+            DocumentFill.WHITE
+        );
+        app.activeDocument = maskDoc;
+        maskDoc.paste();
+        maskDoc.flatten();
+        assertSameCanvas(maskDoc, outputDoc);
+        currentStage = "Applying the updated MM/Sky_Invert mask";
+        replaceMaskOnLayerTree(maskDoc, outputDoc, skyTargetGroup);
+        maskDoc.close(SaveOptions.DONOTSAVECHANGES);
+        maskDoc = null;
 
         var baseName = renderFile.name.replace(/\.exr$/i, "");
         var outputFile = nextAvailableFile(outputFolder, baseName + "_Edited", ".psd");
