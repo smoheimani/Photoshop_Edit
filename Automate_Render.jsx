@@ -102,7 +102,7 @@ app.bringToFront();
             maskDoc = app.open(maskFiles[i]);
             assertSameCanvas(maskDoc, outputDoc);
             currentStage = "Applying the " + maskNames[i] + " mask";
-            replaceMaskOnLayerTree(maskDoc, outputDoc, targetGroups[i]);
+            replaceMaskOnLayer(maskDoc, outputDoc, targetGroups[i]);
             maskDoc.close(SaveOptions.DONOTSAVECHANGES);
             maskDoc = null;
         }
@@ -185,7 +185,7 @@ app.bringToFront();
         maskDoc.flatten();
         assertSameCanvas(maskDoc, outputDoc);
         currentStage = "Applying the updated MM/Sky_Invert mask";
-        replaceMaskOnLayerTree(maskDoc, outputDoc, skyTargetGroup);
+        replaceMaskOnLayer(maskDoc, outputDoc, skyTargetGroup);
         maskDoc.close(SaveOptions.DONOTSAVECHANGES);
         maskDoc = null;
 
@@ -331,27 +331,14 @@ app.bringToFront();
         }
     }
 
-    function replaceMaskOnLayerTree(sourceDoc, targetDoc, targetLayer) {
-        var targetLayers = [];
-        collectLayerTree(targetLayer, targetLayers);
+    function replaceMaskOnLayer(sourceDoc, targetDoc, targetLayer) {
         currentStage = "Loading the " + targetLayer.name + " mask channel";
         var sourceChannel = sourceDoc.channels[0];
         var targetChannel = sourceChannel.duplicate(targetDoc);
-        for (var i = 0; i < targetLayers.length; i++) {
-            applySelectionAsMask(targetDoc, targetChannel, targetLayers[i]);
-        }
+        applySelectionAsMask(targetDoc, targetChannel, targetLayer);
         targetDoc.selection.deselect();
         targetChannel.remove();
         targetDoc.activeChannels = targetDoc.componentChannels;
-    }
-
-    function collectLayerTree(layer, result) {
-        result.push(layer);
-        if (layer.typename === "LayerSet") {
-            for (var i = 0; i < layer.layers.length; i++) {
-                collectLayerTree(layer.layers[i], result);
-            }
-        }
     }
 
     function applySelectionAsMask(targetDoc, maskChannel, targetLayer) {
